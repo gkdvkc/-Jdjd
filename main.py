@@ -3,6 +3,7 @@ import logging
 import sqlite3
 import json
 import base64
+import os  # <-- این خط را حتماً اضافه کنید
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
