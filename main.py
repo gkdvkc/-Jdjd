@@ -3,7 +3,7 @@ import logging
 import sqlite3
 import json
 import base64
-import os  # <-- این خط را حتماً اضافه کنید
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
@@ -12,9 +12,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 # ========== تنظیمات ==========
-TOKEN = "8810741889:AAEjL5vlgL0mxZeAmRGWtDuU7kKFCKwJQ2M"  # توکن شما
-MARZBAN_URL = "http://localhost:8000/api"  # آدرس پنل Marzban (در صورت نیاز تغییر دهید)
-ADMIN_IDS = [123456789]  # لیست عددی آیدی ادمین‌ها (آیدی خود را جایگزین کنید)
+TOKEN = "8810741889:AAEjL5vlgL0mxZeAmRGWtDuU7kKFCKwJQ2M"
+MARZBAN_URL = "http://localhost:8000/api"  # اگه پنل جای دیگه‌ست عوض کن
+ADMIN_IDS = [123456789]  # آیدی عددی خودت رو بذار
 
 # ========== لاگ ==========
 logging.basicConfig(
@@ -70,8 +70,7 @@ def db_execute(query, params=(), fetchone=False, fetchall=False):
     conn.close()
     return result
 
-# ========== توابع کمکی ==========
-def get_user(telegram_id: int) -> Optional[Dict]:
+def get_user(telegram_id: int):
     row = db_execute("SELECT * FROM users WHERE id=?", (telegram_id,), fetchone=True)
     if row:
         return {"id": row[0], "username": row[1], "first_name": row[2], "last_name": row[3], "created_at": row[4]}
@@ -81,7 +80,7 @@ def add_user(telegram_id: int, username: str, first_name: str, last_name: str):
     db_execute("INSERT OR IGNORE INTO users (id, username, first_name, last_name, created_at) VALUES (?, ?, ?, ?, ?)",
                (telegram_id, username, first_name, last_name, datetime.now().isoformat()))
 
-def get_configs_by_user(telegram_id: int) -> list:
+def get_configs_by_user(telegram_id: int):
     rows = db_execute("SELECT * FROM configs WHERE user_id=?", (telegram_id,), fetchall=True)
     return [{"id": r[0], "user_id": r[1], "username": r[2], "password": r[3], "expires_at": r[4],
              "traffic_limit": r[5], "used_traffic": r[6], "status": r[7], "created_at": r[8]} for r in rows]
@@ -104,8 +103,7 @@ def get_active_configs():
 def is_admin(telegram_id: int) -> bool:
     return telegram_id in ADMIN_IDS
 
-# ========== ارتباط با API Marzban ==========
-async def marzban_request(method: str, endpoint: str, data: Dict = None) -> Optional[Dict]:
+async def marzban_request(method: str, endpoint: str, data: Dict = None):
     url = f"{MARZBAN_URL}{endpoint}"
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     async with aiohttp.ClientSession() as session:
@@ -120,28 +118,27 @@ async def marzban_request(method: str, endpoint: str, data: Dict = None) -> Opti
             logger.error(f"Marzban request failed: {e}")
             return None
 
-async def create_marzban_user(username: str, password: str, expire_days: int, traffic_gb: int) -> Optional[Dict]:
+async def create_marzban_user(username: str, password: str, expire_days: int, traffic_gb: int):
     expire_date = (datetime.now() + timedelta(days=expire_days)).isoformat() + "Z"
     payload = {
         "username": username,
         "password": password,
         "expire": expire_date,
-        "data_limit": traffic_gb * 1024**3,  # bytes
+        "data_limit": traffic_gb * 1024**3,
         "status": "active"
     }
     return await marzban_request("POST", "/user", payload)
 
-async def get_marzban_user(username: str) -> Optional[Dict]:
+async def get_marzban_user(username: str):
     return await marzban_request("GET", f"/user/{username}")
 
-async def update_marzban_user(username: str, data: Dict) -> Optional[Dict]:
+async def update_marzban_user(username: str, data: Dict):
     return await marzban_request("PUT", f"/user/{username}", data)
 
 async def delete_marzban_user(username: str) -> bool:
     result = await marzban_request("DELETE", f"/user/{username}")
     return result is not None
 
-# ========== توابع ربات ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username, user.first_name, user.last_name)
@@ -166,7 +163,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
 
     if data == "create":
-        await query.edit_message_text("⏳ لطفاً مدت اعتبار (به روز) و حجم ترافیک (به گیگابایت) را وارد کنید.\nمثال: `30 100`\n(عدد اول روز، عدد دوم گیگ)")
+        await query.edit_message_text("⏳ لطفاً مدت اعتبار (به روز) و حجم ترافیک (به گیگابایت) را وارد کنید.\nمثال: `30 100`")
         context.user_data["awaiting_create"] = True
         return
 
@@ -174,14 +171,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         configs = get_configs_by_user(user_id)
         active_configs = [c for c in configs if c["status"] == "active"]
         if not active_configs:
-            await query.edit_message_text("❌ هیچ کانفیگ فعالی ندارید. ابتدا یک کانفیگ ایجاد کنید.")
+            await query.edit_message_text("❌ هیچ کانفیگ فعالی ندارید.")
             return
-        # تولید لینک سابسکریپشن (فرض می‌کنیم پنل Marzban سابسکریپشن دارد)
-        # معمولاً لینک سابسکریپشن: http://panelip:port/sub/{username}?format=clash
-        # ما یک لینک عمومی می‌سازیم (فرض کنید پنل روی همان آدرس است)
-        username = active_configs[0]["username"]  # فقط اولین را برمی‌گردانیم
+        username = active_configs[0]["username"]
         sub_link = f"http://localhost:8000/sub/{username}?format=clash"
-        await query.edit_message_text(f"🔗 لینک سابسکریپشن شما:\n`{sub_link}`\n\nمی‌توانید این لینک را در کلاینت خود وارد کنید.", parse_mode="Markdown")
+        await query.edit_message_text(f"🔗 لینک سابسکریپشن شما:\n`{sub_link}`", parse_mode="Markdown")
         return
 
     elif data == "status":
@@ -206,7 +200,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not active:
             await query.edit_message_text("❌ هیچ کانفیگ فعالی برای تمدید ندارید.")
             return
-        # نمایش لیست برای انتخاب
         keyboard = []
         for cfg in active:
             keyboard.append([InlineKeyboardButton(cfg["username"], callback_data=f"renew_{cfg['username']}")])
@@ -216,7 +209,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("renew_"):
         username = data.split("_", 1)[1]
-        # از کاربر تعداد روز جدید بپرسیم
         context.user_data["renew_username"] = username
         context.user_data["awaiting_renew"] = True
         await query.edit_message_text("⏳ تعداد روزهای تمدید را وارد کنید (مثلاً 30):")
@@ -262,13 +254,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "admin_cleanup":
         if not is_admin(user_id): return
-        # پاک‌سازی کاربران منقضی
         now = datetime.now().isoformat()
         expired = db_execute("SELECT username FROM configs WHERE expires_at < ? AND status='active'", (now,), fetchall=True)
         count = 0
         for row in expired:
             username = row[0]
-            # حذف از Marzban
             if await delete_marzban_user(username):
                 update_config_status(username, "expired")
                 count += 1
@@ -276,7 +266,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "main_menu":
-        await start(update, context)  # بازگشت به منو
+        await start(update, context)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -294,19 +284,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             await update.message.reply_text("❌ لطفاً اعداد معتبر وارد کنید.")
             return
-        # تولید نام کاربری و رمز
         username = f"user_{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        password = base64.b64encode(os.urandom(12)).decode()[:12]  # نیاز به import os
-        # ایجاد در Marzban
+        password = base64.b64encode(os.urandom(12)).decode()[:12]
         result = await create_marzban_user(username, password, days, gb)
         if result:
-            # ذخیره در دیتابیس محلی
             expires_at = (datetime.now() + timedelta(days=days)).isoformat()
             add_config(user_id, username, password, expires_at, gb * 1024**3)
             await update.message.reply_text(f"✅ کانفیگ با موفقیت ایجاد شد!\n\n👤 نام کاربری: `{username}`\n🔑 رمز: `{password}`\n📅 انقضا: {expires_at[:10]}\n📊 حجم: {gb} GB\n\n🔗 لینک سابسکریپشن: `http://localhost:8000/sub/{username}?format=clash`", parse_mode="Markdown")
         else:
             await update.message.reply_text("❌ خطا در ایجاد کانفیگ. لطفاً با ادمین تماس بگیرید.")
-        # نمایش منو دوباره
         await start(update, context)
         return
 
@@ -318,17 +304,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کنید.")
             return
-        # دریافت اطلاعات کاربر از Marzban
         user_data = await get_marzban_user(username)
         if not user_data:
             await update.message.reply_text("❌ کاربر در پنل یافت نشد.")
             return
-        # تمدید: expire را به روز می‌کنیم
         new_expire = (datetime.now() + timedelta(days=days)).isoformat() + "Z"
         update_data = {"expire": new_expire}
         result = await update_marzban_user(username, update_data)
         if result:
-            # آپدیت دیتابیس محلی
             new_expire_local = (datetime.now() + timedelta(days=days)).isoformat()
             db_execute("UPDATE configs SET expires_at=? WHERE username=?", (new_expire_local, username))
             await update.message.reply_text(f"✅ کانفیگ {username} به مدت {days} روز تمدید شد. انقضای جدید: {new_expire_local[:10]}")
@@ -337,18 +320,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
 
-    # بخش مدیریت
     if context.user_data.get("admin_ban"):
         context.user_data["admin_ban"] = False
         username = text.strip()
-        # دریافت وضعیت فعلی از دیتابیس
         row = db_execute("SELECT status FROM configs WHERE username=?", (username,), fetchone=True)
         if not row:
             await update.message.reply_text("❌ کاربر یافت نشد.")
             return
         current_status = row[0]
         new_status = "disabled" if current_status == "active" else "active"
-        # آپدیت در Marzban
         update_data = {"status": new_status}
         result = await update_marzban_user(username, update_data)
         if result:
@@ -362,7 +342,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("admin_delete"):
         context.user_data["admin_delete"] = False
         username = text.strip()
-        # حذف از Marzban
         if await delete_marzban_user(username):
             delete_config(username)
             await update.message.reply_text(f"✅ کاربر {username} حذف شد.")
@@ -371,13 +350,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
 
-    # اگر هیچکدام نبود، راهنمایی
     await update.message.reply_text("لطفاً از دکمه‌های منو استفاده کنید یا دستور /start را بزنید.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("برای استفاده از ربات، روی /start کلیک کنید و از منو انتخاب کنید.")
 
-# ========== پاک‌سازی خودکار ==========
 async def scheduled_cleanup(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now().isoformat()
     expired = db_execute("SELECT username FROM configs WHERE expires_at < ? AND status='active'", (now,), fetchall=True)
@@ -387,22 +364,16 @@ async def scheduled_cleanup(context: ContextTypes.DEFAULT_TYPE):
             update_config_status(username, "expired")
             logger.info(f"Auto-cleaned expired user: {username}")
 
-# ========== راه‌اندازی ==========
 def main():
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-    # برنامه‌ریزی پاک‌سازی هر ۶ ساعت
     job_queue = app.job_queue
     job_queue.run_repeating(scheduled_cleanup, interval=21600, first=10)
-
     logger.info("ربات راه‌اندازی شد...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    import os  # برای تولید رمز
     main()
